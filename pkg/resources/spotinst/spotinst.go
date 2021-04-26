@@ -45,7 +45,7 @@ func NewCloud(cloudProviderID kops.CloudProviderID) (Cloud, error) {
 	case kops.CloudProviderAWS:
 		cloud = &awsCloud{
 			eg: &awsElastigroupService{eg.CloudProviderAWS()},
-			oc: &awsOceanService{oc.CloudProviderAWS()},
+			oc: &awsOceanClusterService{oc.CloudProviderAWS()},
 			ls: &awsOceanLaunchSpecService{oc.CloudProviderAWS()},
 		}
 	default:
@@ -58,11 +58,9 @@ func NewCloud(cloudProviderID kops.CloudProviderID) (Cloud, error) {
 // NewConfig returns a new configuration object.
 func NewConfig() *spotinst.Config {
 	config := spotinst.DefaultConfig()
-
 	config.WithCredentials(NewCredentials())
 	config.WithLogger(NewStdLogger())
 	config.WithUserAgent("kubernetes-kops/" + kopsv.Version)
-
 	return config
 }
 
@@ -81,7 +79,7 @@ func NewStdLogger() log.Logger {
 	})
 }
 
-// NewInstanceGroups returns an InstanceGroup wrapper for the specified cloud provider.
+// NewInstanceGroup returns an InstanceGroup wrapper for the specified cloud provider.
 func NewInstanceGroup(cloudProviderID kops.CloudProviderID,
 	instanceGroupType InstanceGroupType, obj interface{}) (InstanceGroup, error) {
 
@@ -91,8 +89,10 @@ func NewInstanceGroup(cloudProviderID kops.CloudProviderID,
 			switch instanceGroupType {
 			case InstanceGroupElastigroup:
 				return &awsElastigroupInstanceGroup{obj.(*awseg.Group)}, nil
-			case InstanceGroupOcean:
-				return &awsOceanInstanceGroup{obj.(*awsoc.Cluster)}, nil
+			case InstanceGroupOceanCluster:
+				return &awsOceanClusterInstanceGroup{obj.(*awsoc.Cluster)}, nil
+			case InstanceGroupOceanLaunchSpec:
+				return &awsOceanLaunchSpecInstanceGroup{obj.(*awsoc.LaunchSpec)}, nil
 			default:
 				return nil, fmt.Errorf("spotinst: unsupported instance group type: %s", instanceGroupType)
 			}
@@ -112,24 +112,24 @@ func NewElastigroup(cloudProviderID kops.CloudProviderID,
 		obj)
 }
 
-// NewOcean returns an Ocean wrapper for the specified cloud provider.
-func NewOcean(cloudProviderID kops.CloudProviderID,
+// NewOceanCluster returns an OceanCluster Cluster wrapper for the specified cloud provider.
+func NewOceanCluster(cloudProviderID kops.CloudProviderID,
 	obj interface{}) (InstanceGroup, error) {
 
 	return NewInstanceGroup(
 		cloudProviderID,
-		InstanceGroupOcean,
+		InstanceGroupOceanCluster,
 		obj)
 }
 
-// NewLaunchSpec returns a LaunchSpec wrapper for the specified cloud provider.
-func NewLaunchSpec(cloudProviderID kops.CloudProviderID, obj interface{}) (LaunchSpec, error) {
-	switch cloudProviderID {
-	case kops.CloudProviderAWS:
-		return &awsOceanLaunchSpec{obj.(*awsoc.LaunchSpec)}, nil
-	default:
-		return nil, fmt.Errorf("spotinst: unsupported cloud provider: %s", cloudProviderID)
-	}
+// NewOceanLaunchSpec returns an OceanCluster LaunchSpec wrapper for the specified cloud provider.
+func NewOceanLaunchSpec(cloudProviderID kops.CloudProviderID,
+	obj interface{}) (InstanceGroup, error) {
+
+	return NewInstanceGroup(
+		cloudProviderID,
+		InstanceGroupOceanLaunchSpec,
+		obj)
 }
 
 // LoadCredentials attempts to load credentials using the default chain.

@@ -18,7 +18,10 @@ package spotinst
 
 import (
 	"context"
+	"strings"
 	"time"
+
+	"github.com/spotinst/spotinst-sdk-go/spotinst/client"
 
 	awseg "github.com/spotinst/spotinst-sdk-go/service/elastigroup/providers/aws"
 	awsoc "github.com/spotinst/spotinst-sdk-go/service/ocean/providers/aws"
@@ -29,12 +32,12 @@ import (
 type awsCloud struct {
 	eg InstanceGroupService
 	oc InstanceGroupService
-	ls LaunchSpecService
+	ls InstanceGroupService
 }
 
-func (x *awsCloud) Elastigroup() InstanceGroupService { return x.eg }
-func (x *awsCloud) Ocean() InstanceGroupService       { return x.oc }
-func (x *awsCloud) LaunchSpec() LaunchSpecService     { return x.ls }
+func (x *awsCloud) Elastigroup() InstanceGroupService     { return x.eg }
+func (x *awsCloud) OceanCluster() InstanceGroupService    { return x.oc }
+func (x *awsCloud) OceanLaunchSpec() InstanceGroupService { return x.ls }
 
 type awsElastigroupService struct {
 	svc awseg.Service
@@ -42,7 +45,7 @@ type awsElastigroupService struct {
 
 // List returns a list of InstanceGroups.
 func (x *awsElastigroupService) List(ctx context.Context) ([]InstanceGroup, error) {
-	output, err := x.svc.List(ctx, nil)
+	output, err := x.svc.List(ctx, &awseg.ListGroupsInput{})
 	if err != nil {
 		return nil, err
 	}
@@ -91,7 +94,6 @@ func (x *awsElastigroupService) Update(ctx context.Context, group InstanceGroup)
 
 	_, err := x.svc.Update(ctx, input)
 	return err
-
 }
 
 // Delete deletes an existing InstanceGroup by ID.
@@ -136,27 +138,27 @@ func (x *awsElastigroupService) Instances(ctx context.Context, groupID string) (
 	return instances, err
 }
 
-type awsOceanService struct {
+type awsOceanClusterService struct {
 	svc awsoc.Service
 }
 
 // List returns a list of InstanceGroups.
-func (x *awsOceanService) List(ctx context.Context) ([]InstanceGroup, error) {
-	output, err := x.svc.ListClusters(ctx, nil)
+func (x *awsOceanClusterService) List(ctx context.Context) ([]InstanceGroup, error) {
+	output, err := x.svc.ListClusters(ctx, &awsoc.ListClustersInput{})
 	if err != nil {
 		return nil, err
 	}
 
 	groups := make([]InstanceGroup, len(output.Clusters))
 	for i, group := range output.Clusters {
-		groups[i] = &awsOceanInstanceGroup{group}
+		groups[i] = &awsOceanClusterInstanceGroup{group}
 	}
 
 	return groups, nil
 }
 
 // Create creates a new InstanceGroup and returns its ID.
-func (x *awsOceanService) Create(ctx context.Context, group InstanceGroup) (string, error) {
+func (x *awsOceanClusterService) Create(ctx context.Context, group InstanceGroup) (string, error) {
 	input := &awsoc.CreateClusterInput{
 		Cluster: group.Obj().(*awsoc.Cluster),
 	}
@@ -170,7 +172,7 @@ func (x *awsOceanService) Create(ctx context.Context, group InstanceGroup) (stri
 }
 
 // Read returns an existing InstanceGroup by ID.
-func (x *awsOceanService) Read(ctx context.Context, clusterID string) (InstanceGroup, error) {
+func (x *awsOceanClusterService) Read(ctx context.Context, clusterID string) (InstanceGroup, error) {
 	input := &awsoc.ReadClusterInput{
 		ClusterID: fi.String(clusterID),
 	}
@@ -180,22 +182,21 @@ func (x *awsOceanService) Read(ctx context.Context, clusterID string) (InstanceG
 		return nil, err
 	}
 
-	return &awsOceanInstanceGroup{output.Cluster}, nil
+	return &awsOceanClusterInstanceGroup{output.Cluster}, nil
 }
 
 // Update updates an existing InstanceGroup.
-func (x *awsOceanService) Update(ctx context.Context, group InstanceGroup) error {
+func (x *awsOceanClusterService) Update(ctx context.Context, group InstanceGroup) error {
 	input := &awsoc.UpdateClusterInput{
 		Cluster: group.Obj().(*awsoc.Cluster),
 	}
 
 	_, err := x.svc.UpdateCluster(ctx, input)
 	return err
-
 }
 
 // Delete deletes an existing InstanceGroup by ID.
-func (x *awsOceanService) Delete(ctx context.Context, clusterID string) error {
+func (x *awsOceanClusterService) Delete(ctx context.Context, clusterID string) error {
 	input := &awsoc.DeleteClusterInput{
 		ClusterID: fi.String(clusterID),
 	}
@@ -205,7 +206,7 @@ func (x *awsOceanService) Delete(ctx context.Context, clusterID string) error {
 }
 
 // Detach removes one or more instances from the specified InstanceGroup.
-func (x *awsOceanService) Detach(ctx context.Context, clusterID string, instanceIDs []string) error {
+func (x *awsOceanClusterService) Detach(ctx context.Context, clusterID string, instanceIDs []string) error {
 	input := &awsoc.DetachClusterInstancesInput{
 		ClusterID:                     fi.String(clusterID),
 		InstanceIDs:                   instanceIDs,
@@ -218,7 +219,7 @@ func (x *awsOceanService) Detach(ctx context.Context, clusterID string, instance
 }
 
 // Instances returns a list of all instances that belong to specified InstanceGroup.
-func (x *awsOceanService) Instances(ctx context.Context, clusterID string) ([]Instance, error) {
+func (x *awsOceanClusterService) Instances(ctx context.Context, clusterID string) ([]Instance, error) {
 	input := &awsoc.ListClusterInstancesInput{
 		ClusterID: fi.String(clusterID),
 	}
@@ -240,29 +241,25 @@ type awsOceanLaunchSpecService struct {
 	svc awsoc.Service
 }
 
-// List returns a list of LaunchSpecs.
-func (x *awsOceanLaunchSpecService) List(ctx context.Context, oceanID string) ([]LaunchSpec, error) {
-	input := &awsoc.ListLaunchSpecsInput{
-		OceanID: fi.String(oceanID),
-	}
-
-	output, err := x.svc.ListLaunchSpecs(ctx, input)
+// List returns a list of InstanceGroups.
+func (x *awsOceanLaunchSpecService) List(ctx context.Context) ([]InstanceGroup, error) {
+	output, err := x.svc.ListLaunchSpecs(ctx, &awsoc.ListLaunchSpecsInput{})
 	if err != nil {
 		return nil, err
 	}
 
-	specs := make([]LaunchSpec, len(output.LaunchSpecs))
-	for i, spec := range output.LaunchSpecs {
-		specs[i] = &awsOceanLaunchSpec{spec}
+	groups := make([]InstanceGroup, len(output.LaunchSpecs))
+	for i, group := range output.LaunchSpecs {
+		groups[i] = &awsOceanLaunchSpecInstanceGroup{group}
 	}
 
-	return specs, nil
+	return groups, nil
 }
 
-// Create creates a new LaunchSpec and returns its ID.
-func (x *awsOceanLaunchSpecService) Create(ctx context.Context, spec LaunchSpec) (string, error) {
+// Create creates a new InstanceGroup and returns its ID.
+func (x *awsOceanLaunchSpecService) Create(ctx context.Context, group InstanceGroup) (string, error) {
 	input := &awsoc.CreateLaunchSpecInput{
-		LaunchSpec: spec.Obj().(*awsoc.LaunchSpec),
+		LaunchSpec: group.Obj().(*awsoc.LaunchSpec),
 	}
 
 	output, err := x.svc.CreateLaunchSpec(ctx, input)
@@ -273,8 +270,8 @@ func (x *awsOceanLaunchSpecService) Create(ctx context.Context, spec LaunchSpec)
 	return fi.StringValue(output.LaunchSpec.ID), nil
 }
 
-// Read returns an existing LaunchSpec by ID.
-func (x *awsOceanLaunchSpecService) Read(ctx context.Context, specID string) (LaunchSpec, error) {
+// Read returns an existing InstanceGroup by ID.
+func (x *awsOceanLaunchSpecService) Read(ctx context.Context, specID string) (InstanceGroup, error) {
 	input := &awsoc.ReadLaunchSpecInput{
 		LaunchSpecID: fi.String(specID),
 	}
@@ -284,28 +281,70 @@ func (x *awsOceanLaunchSpecService) Read(ctx context.Context, specID string) (La
 		return nil, err
 	}
 
-	return &awsOceanLaunchSpec{output.LaunchSpec}, nil
+	return &awsOceanLaunchSpecInstanceGroup{output.LaunchSpec}, nil
 }
 
-// Update updates an existing LaunchSpec.
-func (x *awsOceanLaunchSpecService) Update(ctx context.Context, spec LaunchSpec) error {
+// Update updates an existing InstanceGroup.
+func (x *awsOceanLaunchSpecService) Update(ctx context.Context, group InstanceGroup) error {
 	input := &awsoc.UpdateLaunchSpecInput{
-		LaunchSpec: spec.Obj().(*awsoc.LaunchSpec),
+		LaunchSpec: group.Obj().(*awsoc.LaunchSpec),
 	}
 
 	_, err := x.svc.UpdateLaunchSpec(ctx, input)
 	return err
-
 }
 
-// Delete deletes an existing LaunchSpec by ID.
+// Delete deletes an existing InstanceGroup by ID.
 func (x *awsOceanLaunchSpecService) Delete(ctx context.Context, specID string) error {
 	input := &awsoc.DeleteLaunchSpecInput{
 		LaunchSpecID: fi.String(specID),
 	}
 
 	_, err := x.svc.DeleteLaunchSpec(ctx, input)
+	if err != nil {
+		if errs, ok := err.(client.Errors); ok {
+			for _, e := range errs {
+				if strings.Contains(strings.ToLower(e.Message), "ocean does not exist") {
+					return nil
+				}
+			}
+		}
+		return err
+	}
+
+	return nil
+}
+
+// Detach removes one or more instances from the specified InstanceGroup.
+func (x *awsOceanLaunchSpecService) Detach(ctx context.Context, specID string, instanceIDs []string) error {
+	input := &awsoc.DetachClusterInstancesInput{
+		ClusterID:                     fi.String(specID),
+		InstanceIDs:                   instanceIDs,
+		ShouldDecrementTargetCapacity: fi.Bool(false),
+		ShouldTerminateInstances:      fi.Bool(true),
+	}
+
+	_, err := x.svc.DetachClusterInstances(ctx, input)
 	return err
+}
+
+// Instances returns a list of all instances that belong to specified InstanceGroup.
+func (x *awsOceanLaunchSpecService) Instances(ctx context.Context, specID string) ([]Instance, error) {
+	input := &awsoc.ListClusterInstancesInput{
+		ClusterID: fi.String(specID),
+	}
+
+	output, err := x.svc.ListClusterInstances(ctx, input)
+	if err != nil {
+		return nil, err
+	}
+
+	instances := make([]Instance, len(output.Instances))
+	for i, instance := range output.Instances {
+		instances[i] = &awsOceanInstance{instance}
+	}
+
+	return instances, err
 }
 
 type awsElastigroupInstanceGroup struct {
@@ -371,47 +410,91 @@ func (x *awsElastigroupInstance) Obj() interface{} {
 	return x.obj
 }
 
-type awsOceanInstanceGroup struct {
+type awsOceanClusterInstanceGroup struct {
 	obj *awsoc.Cluster
 }
 
 // Id returns the ID of the InstanceGroup.
-func (x *awsOceanInstanceGroup) Id() string {
+func (x *awsOceanClusterInstanceGroup) Id() string {
 	return fi.StringValue(x.obj.ID)
 }
 
 // Type returns the type of the InstanceGroup.
-func (x *awsOceanInstanceGroup) Type() InstanceGroupType {
-	return InstanceGroupOcean
+func (x *awsOceanClusterInstanceGroup) Type() InstanceGroupType {
+	return InstanceGroupOceanCluster
 }
 
 // Name returns the name of the InstanceGroup.
-func (x *awsOceanInstanceGroup) Name() string {
+func (x *awsOceanClusterInstanceGroup) Name() string {
 	return fi.StringValue(x.obj.Name)
 }
 
 // MinSize returns the minimum size of the InstanceGroup.
-func (x *awsOceanInstanceGroup) MinSize() int {
+func (x *awsOceanClusterInstanceGroup) MinSize() int {
 	return fi.IntValue(x.obj.Capacity.Minimum)
 }
 
 // MaxSize returns the maximum size of the InstanceGroup.
-func (x *awsOceanInstanceGroup) MaxSize() int {
+func (x *awsOceanClusterInstanceGroup) MaxSize() int {
 	return fi.IntValue(x.obj.Capacity.Maximum)
 }
 
 // CreatedAt returns the timestamp when the InstanceGroup has been created.
-func (x *awsOceanInstanceGroup) CreatedAt() time.Time {
+func (x *awsOceanClusterInstanceGroup) CreatedAt() time.Time {
 	return spotinst.TimeValue(x.obj.CreatedAt)
 }
 
 // UpdatedAt returns the timestamp when the InstanceGroup has been updated.
-func (x *awsOceanInstanceGroup) UpdatedAt() time.Time {
+func (x *awsOceanClusterInstanceGroup) UpdatedAt() time.Time {
 	return spotinst.TimeValue(x.obj.UpdatedAt)
 }
 
 // Obj returns the raw object which is a cloud-specific implementation.
-func (x *awsOceanInstanceGroup) Obj() interface{} {
+func (x *awsOceanClusterInstanceGroup) Obj() interface{} {
+	return x.obj
+}
+
+type awsOceanLaunchSpecInstanceGroup struct {
+	obj *awsoc.LaunchSpec
+}
+
+// Id returns the ID of the InstanceGroup.
+func (x *awsOceanLaunchSpecInstanceGroup) Id() string {
+	return fi.StringValue(x.obj.ID)
+}
+
+// Type returns the type of the InstanceGroup.
+func (x *awsOceanLaunchSpecInstanceGroup) Type() InstanceGroupType {
+	return InstanceGroupOceanLaunchSpec
+}
+
+// Name returns the name of the InstanceGroup.
+func (x *awsOceanLaunchSpecInstanceGroup) Name() string {
+	return fi.StringValue(x.obj.Name)
+}
+
+// MinSize returns the minimum size of the InstanceGroup.
+func (x *awsOceanLaunchSpecInstanceGroup) MinSize() int {
+	return -1
+}
+
+// MaxSize returns the maximum size of the InstanceGroup.
+func (x *awsOceanLaunchSpecInstanceGroup) MaxSize() int {
+	return -1
+}
+
+// CreatedAt returns the timestamp when the InstanceGroup has been created.
+func (x *awsOceanLaunchSpecInstanceGroup) CreatedAt() time.Time {
+	return spotinst.TimeValue(x.obj.CreatedAt)
+}
+
+// UpdatedAt returns the timestamp when the InstanceGroup has been updated.
+func (x *awsOceanLaunchSpecInstanceGroup) UpdatedAt() time.Time {
+	return spotinst.TimeValue(x.obj.UpdatedAt)
+}
+
+// Obj returns the raw object which is a cloud-specific implementation.
+func (x *awsOceanLaunchSpecInstanceGroup) Obj() interface{} {
 	return x.obj
 }
 
@@ -433,35 +516,3 @@ func (x *awsOceanInstance) CreatedAt() time.Time {
 func (x *awsOceanInstance) Obj() interface{} {
 	return x.obj
 }
-
-type awsOceanLaunchSpec struct {
-	obj *awsoc.LaunchSpec
-}
-
-// Id returns the ID of the LaunchSpec.
-func (x *awsOceanLaunchSpec) Id() string {
-	return fi.StringValue(x.obj.ID)
-}
-
-// Name returns the name of the LaunchSpec.
-func (x *awsOceanLaunchSpec) Name() string {
-	return fi.StringValue(x.obj.Name)
-}
-
-// OceanId returns the ID of the Ocean instance group.
-func (x *awsOceanLaunchSpec) OceanId() string {
-	return fi.StringValue(x.obj.OceanID)
-}
-
-// CreatedAt returns the timestamp when the LaunchSpec has been created.
-func (x *awsOceanLaunchSpec) CreatedAt() time.Time {
-	return spotinst.TimeValue(x.obj.CreatedAt)
-}
-
-// UpdatedAt returns the timestamp when the LaunchSpec has been updated.
-func (x *awsOceanLaunchSpec) UpdatedAt() time.Time {
-	return spotinst.TimeValue(x.obj.UpdatedAt)
-}
-
-// Obj returns the raw object which is a cloud-specific implementation.
-func (x *awsOceanLaunchSpec) Obj() interface{} { return x.obj }
